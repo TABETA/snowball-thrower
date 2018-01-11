@@ -41,7 +41,32 @@ typedef struct {
 	uint16_t duration;
 } command; 
 
-static bool isSetupDone = false;
+
+typedef enum {
+	SYNC_CONTROLLER,
+	SYNC_POSITION,
+	BREATHE,
+	PROCESS,
+	CLEANUP,
+	DONE
+} State_t;
+typedef struct Report{
+#define ECHOES 2
+	State_t state;
+	USB_JoystickReport_Input_t last_report;
+	int echoes;
+	int report_count;
+	int xpos;
+	int ypos;
+	int bufindex;
+	int duration_count;
+	int portsval;
+}Report;
+
+void Report_init(Report* const self);
+bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, command commands[]);
+
+static Report report;
 
 static const command setup[] = {
 	// Setup controller
@@ -65,6 +90,7 @@ int main(void) {
 	// We'll then enable global interrupts for our use.
 	GlobalInterruptEnable();
 	// Once that's done, we'll enter an infinite loop.
+	Report_init(&report);
 	for (;;)
 	{
 		// We need to run our task to process and deliver data for our IN and OUT endpoints.
@@ -157,10 +183,19 @@ void HID_Task(void) {
 	// We first check to see if the host is ready to accept data.
 	if (Endpoint_IsINReady())
 	{
+		static bool isSetupDone = false;
 		// We'll create an empty report.
 		USB_JoystickReport_Input_t JoystickInputData;
 		// We'll then populate this report with what we want to send to the host.
-		GetNextReport(&JoystickInputData, isSetupDone? step : setup );
+		if (isSetupDone)
+		{
+			Report_getNext(&report, &JoystickInputData, step);
+		}
+		else
+		{
+			Report_getNext(&report, &JoystickInputData, setup);
+			isSetupDone = true;
+		}
 		// Once populated, we can output this data to the host. We do this by first writing the data to the control stream.
 		while(Endpoint_Write_Stream_LE(&JoystickInputData, sizeof(JoystickInputData), NULL) != ENDPOINT_RWSTREAM_NoError);
 		// We then send an IN packet on this endpoint.
@@ -168,34 +203,24 @@ void HID_Task(void) {
 	}
 }
 
-typedef enum {
-	SYNC_CONTROLLER,
-	SYNC_POSITION,
-	BREATHE,
-	PROCESS,
-	CLEANUP,
-	DONE
-} State_t;
-State_t state = SYNC_CONTROLLER;
 
-#define ECHOES 2
-int echoes = 0;
-USB_JoystickReport_Input_t last_report;
 
-int report_count = 0;
-int xpos = 0;
-int ypos = 0;
-int bufindex = 0;
-int duration_count = 0;
-int portsval = 0;
+void Report_init(Report* const self){
+	self->state = SYNC_CONTROLLER;
+	self->report_count = 0;
+	self->xpos = 0;
+	self->ypos = 0;
+	self->bufindex = 0;
+	self->duration_count = 0;
+	self->portsval = 0;
+}
 
-void reset(USB_JoystickReport_Input_t* const ReportData){
+void Report_reset(Report* const self, USB_JoystickReport_Input_t* const ReportData){
 	// state = CLEANUP;
-	isSetupDone = true;
-	bufindex = 0;
-	duration_count = 0;
+	self->bufindex = 0;
+	self->duration_count = 0;
 
-	state = BREATHE;
+	self->state = BREATHE;
 
 	ReportData->LX = STICK_CENTER;
 	ReportData->LY = STICK_CENTER;
@@ -208,8 +233,8 @@ void reset(USB_JoystickReport_Input_t* const ReportData){
 	//				state = BREATHE;
 }
 // Prepare the next report for the host.
-void GetNextReport(USB_JoystickReport_Input_t* const ReportData, command commands[]) {
-
+bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, command commands[]) {
+	bool retval = false;
 	// Prepare an empty report
 	memset(ReportData, 0, sizeof(USB_JoystickReport_Input_t));
 	ReportData->LX = STICK_CENTER;
@@ -219,19 +244,19 @@ void GetNextReport(USB_JoystickReport_Input_t* const ReportData, command command
 	ReportData->HAT = HAT_CENTER;
 
 	// Repeat ECHOES times the last report
-	if (echoes > 0)
+	if (self->echoes > 0)
 	{
-		memcpy(ReportData, &last_report, sizeof(USB_JoystickReport_Input_t));
-		echoes--;
-		return;
+		memcpy(ReportData, &(self->last_report), sizeof(USB_JoystickReport_Input_t));
+		(self->echoes)--;
+		return retval;
 	}
 
 	// States and moves management
-	switch (state)
+	switch (self->state)
 	{
 
 		case SYNC_CONTROLLER:
-			state = BREATHE;
+			self->state = BREATHE;
 			break;
 
 		// case SYNC_CONTROLLER:
@@ -261,7 +286,7 @@ void GetNextReport(USB_JoystickReport_Input_t* const ReportData, command command
 		// 	break;
 
 		case SYNC_POSITION:
-			bufindex = 0;
+			self->bufindex = 0;
 
 
 			ReportData->Button = 0;
@@ -272,36 +297,38 @@ void GetNextReport(USB_JoystickReport_Input_t* const ReportData, command command
 			ReportData->HAT = HAT_CENTER;
 
 
-			state = BREATHE;
+			self->state = BREATHE;
 			break;
 
 		case BREATHE:
-			state = PROCESS;
+			self->state = PROCESS;
 			break;
 
 		case PROCESS:
-			if (commands[bufindex].duration == -1)
+			if (commands[self->bufindex].duration == -1)
 			{
-				reset(ReportData);
+				Report_reset(self, ReportData);
+				retval = true;
 			}
-
-			switch (commands[bufindex].button)
+			else
 			{
+				switch (commands[self->bufindex].button)
+				{
 
 				case UP:
-					ReportData->LY = STICK_MIN;				
+					ReportData->LY = STICK_MIN;
 					break;
 
 				case LEFT:
-					ReportData->LX = STICK_MIN;				
+					ReportData->LX = STICK_MIN;
 					break;
 
 				case DOWN:
-					ReportData->LY = STICK_MAX;				
+					ReportData->LY = STICK_MAX;
 					break;
 
 				case RIGHT:
-					ReportData->LX = STICK_MAX;				
+					ReportData->LX = STICK_MAX;
 					break;
 
 				case A:
@@ -317,7 +344,7 @@ void GetNextReport(USB_JoystickReport_Input_t* const ReportData, command command
 					break;
 
 				case THROW:
-					ReportData->LY = STICK_MIN;				
+					ReportData->LY = STICK_MIN;
 					ReportData->Button |= SWITCH_R;
 					break;
 
@@ -332,26 +359,28 @@ void GetNextReport(USB_JoystickReport_Input_t* const ReportData, command command
 					ReportData->RY = STICK_CENTER;
 					ReportData->HAT = HAT_CENTER;
 					break;
+				}
+
+				(self->duration_count)++;
+
+				if (self->duration_count > commands[self->bufindex].duration)
+				{
+					(self->bufindex)++;
+					self->duration_count = 0;
+				}
+
+				if (self->bufindex > (int)(sizeof(commands) / sizeof(commands[0])) - 1)
+				{
+					Report_reset(self, ReportData);
+					retval = true;
+				}
 			}
 
-			duration_count++;
-
-			if (duration_count > commands[bufindex].duration)
-			{
-				bufindex++;
-				duration_count = 0;				
-			}
-
-
-			if (bufindex > (int)( sizeof(commands) / sizeof(commands[0])) - 1)
-			{
-				reset(ReportData);
-			}
 
 			break;
 
 		case CLEANUP:
-			state = DONE;
+			self->state = DONE;
 			break;
 
 		case DONE:
@@ -361,7 +390,7 @@ void GetNextReport(USB_JoystickReport_Input_t* const ReportData, command command
 			PORTB = portsval;
 			_delay_ms(250);
 			#endif
-			return;
+			return retval;
 	}
 
 	// // Inking
@@ -370,7 +399,8 @@ void GetNextReport(USB_JoystickReport_Input_t* const ReportData, command command
 	// 		ReportData->Button |= SWITCH_A;
 
 	// Prepare to echo this report
-	memcpy(&last_report, ReportData, sizeof(USB_JoystickReport_Input_t));
-	echoes = ECHOES;
+	memcpy(&(self->last_report), ReportData, sizeof(USB_JoystickReport_Input_t));
+	self->echoes = ECHOES;
+	return retval;
 
 }
