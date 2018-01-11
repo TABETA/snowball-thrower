@@ -64,7 +64,7 @@ typedef struct Report{
 }Report;
 
 void Report_init(Report* const self);
-bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, command commands[]);
+bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, const command commands[]);
 
 static Report report;
 
@@ -233,7 +233,7 @@ void Report_reset(Report* const self, USB_JoystickReport_Input_t* const ReportDa
 	//				state = BREATHE;
 }
 // Prepare the next report for the host.
-bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, command commands[]) {
+bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, const command commands[]) {
 	bool retval = false;
 	// Prepare an empty report
 	memset(ReportData, 0, sizeof(USB_JoystickReport_Input_t));
