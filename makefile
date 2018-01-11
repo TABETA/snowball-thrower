@@ -20,7 +20,8 @@ OPTIMIZATION = s
 TARGET       = Joystick
 SRC          = $(TARGET).c Descriptors.c $(LUFA_SRC_USB)
 LUFA_PATH    = ./lufa/LUFA
-CC_FLAGS     = -DUSE_LUFA_CONFIG_HEADER -IConfig/
+COMMAND_FILE?="sample.txt"
+CC_FLAGS     = -DUSE_LUFA_CONFIG_HEADER -DMAX_STEP=1000 -DCOMMAND_FILE=$(COMMAND_FILE) -IConfig/
 LD_FLAGS     =
 
 # Default target
