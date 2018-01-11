@@ -64,7 +64,7 @@ typedef struct Report{
 }Report;
 
 void Report_init(Report* const self);
-bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, const command commands[]);
+bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, const command commands[], const int commandnum);
 
 static Report report;
 
@@ -77,6 +77,7 @@ static const command setup[] = {
 	{ NOTHING, 150 },
 	{ A, 5 },
 	{ NOTHING, 250 },
+	{ NOTHING, -1 },
 };
 
 static command step[MAX_STEP] = {
@@ -189,12 +190,16 @@ void HID_Task(void) {
 		// We'll then populate this report with what we want to send to the host.
 		if (isSetupDone)
 		{
-			Report_getNext(&report, &JoystickInputData, step);
+			const int commandnum = (int)(sizeof(step) / sizeof(step[0])) - 1;
+			Report_getNext(&report, &JoystickInputData, step, commandnum);
 		}
 		else
 		{
-			Report_getNext(&report, &JoystickInputData, setup);
-			isSetupDone = true;
+			const int commandnum = (int)(sizeof(setup) / sizeof(setup[0])) - 1;
+			if (Report_getNext(&report, &JoystickInputData, setup, commandnum))
+			{
+				isSetupDone = true;
+			}	
 		}
 		// Once populated, we can output this data to the host. We do this by first writing the data to the control stream.
 		while(Endpoint_Write_Stream_LE(&JoystickInputData, sizeof(JoystickInputData), NULL) != ENDPOINT_RWSTREAM_NoError);
@@ -233,7 +238,7 @@ void Report_reset(Report* const self, USB_JoystickReport_Input_t* const ReportDa
 	//				state = BREATHE;
 }
 // Prepare the next report for the host.
-bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, const command commands[]) {
+bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const ReportData, const command commands[], const int commandnum) {
 	bool retval = false;
 	// Prepare an empty report
 	memset(ReportData, 0, sizeof(USB_JoystickReport_Input_t));
@@ -369,7 +374,7 @@ bool Report_getNext(Report* const self, USB_JoystickReport_Input_t* const Report
 					self->duration_count = 0;
 				}
 
-				if (self->bufindex > (int)(sizeof(commands) / sizeof(commands[0])) - 1)
+				if (self->bufindex > commandnum)
 				{
 					Report_reset(self, ReportData);
 					retval = true;
